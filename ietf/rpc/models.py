@@ -1,5 +1,7 @@
 # Copyright The IETF Trust 2023, All Rights Reserved
 # -*- coding: utf-8 -*-
+from simple_history.models import HistoricalRecords, HistoricForeignKey
+
 from django.db import models
 from django.utils import timezone
 
@@ -20,7 +22,6 @@ class RfcToBe(models.Model):
     Notes:
      * not in_progress and not published = abandoned without publication
     """
-
     in_progress = models.BooleanField(default=True)
     published = models.DateTimeField(
         null=True
@@ -31,7 +32,7 @@ class RfcToBe(models.Model):
     )  # only null if is_april_first_rfc is True
     rfc_number = models.PositiveIntegerField(null=True)
 
-    cluster = models.ForeignKey("Cluster", null=True, on_delete=models.SET_NULL)
+    cluster = HistoricForeignKey("Cluster", null=True, on_delete=models.SET_NULL)
     order_in_cluster = models.PositiveSmallIntegerField(default=1)
 
     submitted_format = models.ForeignKey(SourceFormatName, on_delete=models.PROTECT)
@@ -58,6 +59,8 @@ class RfcToBe(models.Model):
     external_deadline = models.DateTimeField(null=True)
     internal_goal = models.DateTimeField(null=True)
 
+    history = HistoricalRecords()
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -76,6 +79,10 @@ class RfcToBe(models.Model):
 
 class Cluster(models.Model):
     number = models.PositiveIntegerField(unique=True)
+    history = HistoricalRecords()
+
+    def membership_changes(self):
+        return RfcToBe.history.filter(cluster=self).order_by("history_date").values_list("history_date", flat=True)
 
 
 class UnusableRfcNumber:
