@@ -33,6 +33,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.validators import URLValidator
 from django.urls import reverse,reverse_lazy
 from django.db.models import F, Max, Q
@@ -1616,7 +1617,6 @@ def agenda_plain(request, num=None, name=None, base=None, ext=None, owner=None, 
                 "now": timezone.now().astimezone(meeting.tz()),
                 "display_timezone": display_timezone,
                 "is_current_meeting": is_current_meeting,
-                "use_notes": meeting.uses_notes(),
                 "cache_time": 150 if is_current_meeting else 3600,
             },
             content_type=mimetype[ext],
@@ -1691,7 +1691,7 @@ def api_get_agenda_data (request, num=None):
         },
         "categories": filter_organizer.get_filter_categories(),
         "isCurrentMeeting": is_current_meeting,
-        "useNotes": meeting.uses_notes(),
+        "usesNotes": meeting.uses_notes(),
         "schedule": list(map(agenda_extract_schedule, filtered_assignments)),
         "floors": list(map(agenda_extract_floorplan, floors))
     })
@@ -2488,7 +2488,6 @@ def session_details(request, num, acronym):
                     'can_manage_materials' : can_manage,
                     'can_view_request': can_view_request,
                     'thisweek': datetime_today()-datetime.timedelta(days=7),
-                    'use_notes': meeting.uses_notes(),
                   })
 
 class SessionDraftsForm(forms.Form):
@@ -2795,6 +2794,17 @@ class UploadOrEnterAgendaForm(UploadAgendaForm):
         elif submission_method == "enter":
             require_field("content")
 
+    def get_file(self):
+        """Get content as a file-like object"""
+        if self.cleaned_data.get("submission_method") == "upload":
+            return self.cleaned_data["file"]
+        else:
+            return SimpleUploadedFile(
+                name="uploaded.md",
+                content=self.cleaned_data["content"].encode("utf-8"),
+                content_type="text/markdown;charset=utf-8",
+            )
+
 def upload_session_agenda(request, session_id, num):
     # num is redundant, but we're dragging it along an artifact of where we are in the current URL structure
     session = get_object_or_404(Session,pk=session_id)
@@ -2815,21 +2825,8 @@ def upload_session_agenda(request, session_id, num):
     if request.method == 'POST':
         form = UploadOrEnterAgendaForm(show_apply_to_all_checkbox,request.POST,request.FILES)
         if form.is_valid():
-            submission_method = form.cleaned_data['submission_method']
-            if submission_method == "upload":
-                file = request.FILES['file']
-                _, ext = os.path.splitext(file.name)
-            else:
-                if agenda_sp:
-                    doc = agenda_sp.document
-                    _, ext = os.path.splitext(doc.uploaded_filename)
-                else:
-                    ext = ".md"
-                fd, name = tempfile.mkstemp(suffix=ext, text=True)
-                os.close(fd)
-                with open(name, "w") as file:
-                    file.write(form.cleaned_data['content'])
-                file = open(name, "rb")
+            file = form.get_file()
+            _, ext = os.path.splitext(file.name)
             apply_to_all = session.type.slug == 'regular'
             if show_apply_to_all_checkbox:
                 apply_to_all = form.cleaned_data['apply_to_all']
